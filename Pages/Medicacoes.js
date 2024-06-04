@@ -52,7 +52,6 @@ export default function Medicacoes({ navigation }) {
     try{
       auth.signOut();
       navigation.navigate('Login');
-      Alert.alert('Logout', 'Você saiu com sucesso!');
     } catch(e){
       Alert.alert('Logout', 'erro ao fazer logout!');
     }
@@ -154,7 +153,6 @@ export default function Medicacoes({ navigation }) {
       const medicacoes = collection(userRef, "medicacoes");
       const medicacaoRef = doc(medicacoes, medicacaoId);
       await updateDoc(medicacaoRef, novosDados);
-      console.log('Documento atualizado com sucesso!');
     } catch (error) {
         console.error('Erro ao atualizar documento: ', error);
     }
@@ -176,9 +174,7 @@ export default function Medicacoes({ navigation }) {
       const updatedAlarmList = alarmList.filter(alarm => alarm.id !== id);
       setAlarmList(updatedAlarmList);
     }catch(error){
-      console.log('erro ao deletar');
-      const code = error.code;
-      console.log(code);
+      alert('Erro ao deletar');
     }
     
   };
@@ -190,13 +186,14 @@ export default function Medicacoes({ navigation }) {
 
   return (
     <View style={styles.flexContainer}>
-      <View style={styles.flexContainer}>
-      <ScrollView contentContainerStyle={styles.container}>
+      <View style={styles.header}>
         <Text style={styles.title}>Medicações</Text>
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
           <FontAwesome5 name="sign-out-alt" size={20} color="#fff" />
         </TouchableOpacity>
-        {alarmList.map(alarm => (
+      </View>  
+        <ScrollView contentContainerStyle={styles.container}>
+          {alarmList.map(alarm => (
           <View key={alarm.id} style={styles.alarmCard}>
             <Text style={styles.alarmLabel}>{alarm.medicationName}</Text>
             <Text style={styles.alarmTime}>{alarm.time.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</Text>
@@ -219,7 +216,6 @@ export default function Medicacoes({ navigation }) {
           </View>
         ))}
       </ScrollView>
-      </View>
       <TouchableOpacity style={styles.setAlarmButton} onPress={handleAddDose}>
         <Text style={styles.setAlarmButtonText}>Adicionar Dose</Text>
       </TouchableOpacity>
@@ -266,6 +262,16 @@ const styles = StyleSheet.create({
   flexContainer: {
     flex: 1,
   },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+    paddingHorizontal: 20,
+    paddingTop: 40,
+    paddingBottom: 10,
+    backgroundColor: '#222',
+  },
   container: {
     flexGrow: 1,
     justifyContent: 'flex-start',
@@ -276,10 +282,15 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 32,
     fontWeight: 'bold',
-    marginBottom: 20,
     color: '#fff',
     textAlign: 'center',
-    marginTop: 30, // Adiciona uma margem superior para afastar do topo
+    marginTop: 30,
+  },
+  logoutButton: {
+    padding: 10,
+    marginTop: 30,
+    backgroundColor: '#dc143c',
+    borderRadius: 20,
   },
   alarmCard: {
     width: '100%',
