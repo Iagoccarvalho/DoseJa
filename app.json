@@ -2,32 +2,36 @@
   "expo": {
     "name": "DoseJa",
     "slug": "DoseJa",
-    "version": "1.0.0",
+    "version": "5.0.0",
     "orientation": "portrait",
     "icon": "./assets/logo.png",
     "userInterfaceStyle": "light",
     "splash": {
       "image": "./assets/logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#272727"
     },
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/logo.png",
         "backgroundColor": "#ffffff"
+      },"splash": {
+        "image": "./assets/logo.png",
+        "backgroundColor": "#272727",
+        "resizeMode": "contain"
       },
       "package": "com.iagoccarvalho.DoseJa"
     },
     "web": {
-      "favicon": "./assets/favicon.png"
     },
     "extra": {
       "eas": {
         "projectId": "67e52e3d-18e3-4933-90b7-6c240dff3379"
       }
-    }
+    },
+    "owner": "iagoccarvalho"
   }
 }
