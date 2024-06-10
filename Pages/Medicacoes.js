@@ -1,12 +1,24 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, TextInput, ScrollView, Switch, Modal, Alert } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, TextInput, ScrollView, Switch, Modal, Alert , Platform} from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { FontAwesome5 } from '@expo/vector-icons';
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
+import Constants from 'expo-constants';
+import moment from 'moment-timezone';
 
 import { FIREBASE_AUTH } from '../firebaseConfig';
 import { FIREBASE_DB } from '../firebaseConfig';
 
-import { addDoc, collection, doc, updateDoc, deleteDoc, getDocs, Timestamp  } from "firebase/firestore"; 
+import { addDoc, collection, doc, updateDoc, deleteDoc, getDocs, Timestamp, getDoc  } from "firebase/firestore"; 
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
 
 export default function Medicacoes({ navigation }) {
   const [alarmList, setAlarmList] = useState([]);
@@ -16,10 +28,16 @@ export default function Medicacoes({ navigation }) {
   const [modalVisible, setModalVisible] = useState(false);
   const [isAddingDose, setIsAddingDose] = useState(false);
   const [editingAlarm, setEditingAlarm] = useState(null);
+  const [notifyIdState, setNotifyIdState] = useState('');
+  const [expoPushToken, setExpoPushToken] = useState('');
+  const [channels, setChannels] = useState([]);
+  const [notification, setNotification] = useState();
+  const notificationListener = useRef();
+  const responseListener = useRef();
+
   const db = FIREBASE_DB;
   const auth = FIREBASE_AUTH;
   const userId = FIREBASE_AUTH.currentUser.uid;
-
 
   useEffect(() => {
 
@@ -35,18 +53,103 @@ export default function Medicacoes({ navigation }) {
           id: doc.id,
           isOn: doc.data().isOn,
           medicationName: doc.data().medicationName,
-          time: new Timestamp(doc.data().time.seconds, doc.data().time.nanoseconds).toDate()
+          time: new Timestamp(doc.data().time.seconds, doc.data().time.nanoseconds).toDate(),
+          notifyId: doc.data().notifyId
         }
         alarms.push(newAlarm);
       });
       setAlarmList(alarms);
-    }catch (error) {
-      console.error('Erro ao buscar documentos:', error);
+    }catch {
+      Alert.alert('erro');
     }
   };
 
   importarListaMedicacoes();
 }, []);
+
+useEffect(() => {
+  registerForPushNotificationsAsync().then(token => token && setExpoPushToken(token));
+
+  if (Platform.OS === 'android') {
+    Notifications.getNotificationChannelsAsync().then(value => setChannels(value ?? []));
+  }
+  notificationListener.current = Notifications.addNotificationReceivedListener(notification => {
+    setNotification(notification);
+  });
+
+  responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
+    console.log(response);
+  });
+
+  return () => {
+    notificationListener.current &&
+      Notifications.removeNotificationSubscription(notificationListener.current);
+    responseListener.current &&
+      Notifications.removeNotificationSubscription(responseListener.current);
+  };
+}, []);
+
+async function registerForPushNotificationsAsync() {
+  let token;
+
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync('default', {
+      name: 'default',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#FF231F7C',
+    });
+  }
+
+  if (Device.isDevice) {
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    let finalStatus = existingStatus;
+    if (existingStatus !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+    if (finalStatus !== 'granted') {
+      alert('Failed to get push token for push notification!');
+      return;
+    }
+    try {
+      const projectId =
+        Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
+      if (!projectId) {
+        throw new Error('Project ID not found');
+      }
+      token = (
+        await Notifications.getExpoPushTokenAsync({
+          projectId,
+        })
+      ).data;
+      console.log(token);
+    } catch (e) {
+      token = `${e}`;
+    }
+  } else {
+    alert('Must use physical device for Push Notifications');
+  }
+
+  return token;
+}
+
+  const handleCallNotifications = async (medicacaoName, medicacaoTime) => {
+
+    const id = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: 'Hora da dose!',
+        body: medicacaoName
+      },
+      trigger: {
+        hour: medicacaoTime.getHours(),
+        minute: medicacaoTime.getMinutes(),
+        repeats: true,
+      },
+    });
+
+    return id;
+  }
 
   const handleLogout = async () => {
     try{
@@ -58,31 +161,65 @@ export default function Medicacoes({ navigation }) {
 
   };
 
+  const handleCancelScheduledNotification = async (notifyId) => {
+    const i = await Notifications.cancelScheduledNotificationAsync(notifyId);
+  };
+
   const handleAlarmToggle = async (id, isOn) => {
     const userRef = doc(db, 'usuarios', userId);
-
-    if(isOn){
-      await updateDoc(doc(userRef, 'medicacoes', id), {
-        isOn: false
-      });
-    } else {
-        await updateDoc(doc(userRef, 'medicacoes', id), {
-          isOn: true
-      });
+    const medicacaoRef = await getDoc(doc(userRef, 'medicacoes', id));
+    const medicacaoData = {
+      medicationName: medicacaoRef.data().medicationName,
+      time: new Timestamp(medicacaoRef.data().time.seconds, medicacaoRef.data().time.nanoseconds).toDate(),
+      notifyId: medicacaoRef.data().notifyId
     }
 
-    const updatedAlarmList = alarmList.map(alarm => {
-      if (alarm.id === id) {
-        return { ...alarm, isOn: !alarm.isOn };
+    if(isOn){
+      try{
+
+        await handleCancelScheduledNotification(medicacaoData.notifyId)
+        await updateDoc(doc(userRef, 'medicacoes', id), {
+          isOn: false,
+          notifyId: null
+        });
+
+        const updatedAlarmList = alarmList.map(alarm => {
+          if (alarm.id === id) {
+            return { ...alarm, isOn: !alarm.isOn };
+          }
+          return alarm;
+        });
+        setAlarmList(updatedAlarmList);
+
+      }catch {
+        Alert.alert('Erro ao cancelar alarme');
       }
-      return alarm;
-    });
-    setAlarmList(updatedAlarmList);
+
+    } else {
+        try{
+          const notifyId = await handleCallNotifications(medicacaoData.medicationName, medicacaoData.time);
+          await updateDoc(doc(userRef, 'medicacoes', id), {
+            isOn: true,
+            notifyId: notifyId
+          });
+
+          const updatedAlarmList = alarmList.map(alarm => {
+            if (alarm.id === id) {
+              return { ...alarm, isOn: !alarm.isOn };
+            }
+            return alarm;
+          });
+          setAlarmList(updatedAlarmList);
+
+        }catch(e) {
+          Alert.alert('Erro ao ativar alarme');
+        }
+    }
   };
 
   const handleTimeChange = (event, selectedTime) => {
     if (selectedTime !== undefined) {
-      setNewAlarmTime(selectedTime);
+      setNewAlarmTime(moment(selectedTime).tz('America/Sao_Paulo').toDate());
       setShowTimePicker(false);
       setModalVisible(true);
     }
@@ -108,37 +245,45 @@ export default function Medicacoes({ navigation }) {
 
     if (isAddingDose) {
       try{
-
         const medicacoes = collection(doc(db, 'usuarios', userId), 'medicacoes');
         const docRef = await addDoc(medicacoes, {
           time: newAlarmTime,
           isOn: false,
-          medicationName: newMedicationName
+          medicationName: newMedicationName,
+          notifyId: null
         });
 
         const medicacaoId = docRef.id;
-        const newAlarm = { id: medicacaoId, time: newAlarmTime, isOn: false, medicationName: newMedicationName };
+        const newAlarm = { id: medicacaoId, time: newAlarmTime, isOn: false, medicationName: newMedicationName, notifyId: null };
 
         setAlarmList([...alarmList, newAlarm]);
 
       } catch (error) {
-
-          console.error('Erro ao adicionar documento à nova coleção: ', error);
           Alert.alert('', 'Erro ao adicionar dose')
-
       }   
     } else if (editingAlarm !== null) {
+
+      if(notifyIdState !== null){
+
+        await handleCancelScheduledNotification(notifyIdState);
+      }
+
+      const newNotifyId = await handleCallNotifications(newMedicationName, newAlarmTime);
+
       const novosDados = {
         medicationName: newMedicationName,
-        time: newAlarmTime
+        time: newAlarmTime,
+        notifyId: newNotifyId
       };
       updateMedicacao(editingAlarm.id, novosDados);
       const updatedAlarmList = alarmList.map(alarm => {
         if (alarm.id === editingAlarm.id) {
           setModalVisible(false);
+          setShowTimePicker(false);
           return { ...alarm, medicationName: newMedicationName, time: newAlarmTime };
         }
         setModalVisible(false);
+        setShowTimePicker(false);
         return alarm;
       });
       setAlarmList(updatedAlarmList);
@@ -154,15 +299,17 @@ export default function Medicacoes({ navigation }) {
       const medicacaoRef = doc(medicacoes, medicacaoId);
       await updateDoc(medicacaoRef, novosDados);
     } catch (error) {
-        console.error('Erro ao atualizar documento: ', error);
+        Alert.alert('Erro');
     }
   }
 
-  const handleEditAlarm = (id) => {
+  const handleEditAlarm = async (id) => {
+
     const alarm = alarmList.find(alarm => alarm.id === id);
     setEditingAlarm(alarm);
     setNewAlarmTime(alarm.time);
     setNewMedicationName(alarm.medicationName);
+    setNotifyIdState(alarm.notifyId);
     setIsAddingDose(false);
     setShowTimePicker(true);
   };
@@ -170,9 +317,15 @@ export default function Medicacoes({ navigation }) {
   const handleDeleteAlarm = async (id) => {
     try{
       const userRef = doc(db, 'usuarios', userId);
+      const medica = await getDoc(doc(userRef, 'medicacoes', id));
+      const idNotify = medica.data().notifyId
+      if(idNotify !== null){
+        await handleCancelScheduledNotification(idNotify);
+      }
       await deleteDoc(doc(userRef, 'medicacoes', id));
       const updatedAlarmList = alarmList.filter(alarm => alarm.id !== id);
       setAlarmList(updatedAlarmList);
+
     }catch(error){
       alert('Erro ao deletar');
     }
